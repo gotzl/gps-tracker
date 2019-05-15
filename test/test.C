@@ -6,7 +6,7 @@
  */
 
 #define TEST
-#include "../gps_tracker.hpp"
+#include "../tracker/gps_tracker.hpp"
 
 
 int main() {

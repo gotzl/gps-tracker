@@ -52,9 +52,8 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 const int32_t MAX_TRACK_POINTS = 8000;
 _track track_ref;
 _point* track;
-int32_t ref_idx = -1;
-int32_t delta = 0;
-int32_t fix_time_millis = 0;
+int32_t ref_idx = -1, delta = 0,fix_time_millis = 0;
+int16_t session = -1;
 float dist[32], speed[32];
 
 bool has_ref = false, valid_lap = false;
@@ -219,8 +218,11 @@ void doSomeWork() {
 
 				lframe.finish_time = fix_time_millis + offset;
 
-				char name[12];
-				sprintf(name, "/lap%03i.bin", lframe.lap);
+				if (session < 0)
+					session = createSessionDir(SD);
+
+				char name[23];
+				sprintf(name, "/session%03i/lap%03i.bin", session, lframe.lap);
 				writeFile(SD, name, (uint8_t*) track, sizeof(_point)*lframe.pts);
 
 				if (!has_ref/*or faster*/) {

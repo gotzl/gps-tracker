@@ -5,7 +5,7 @@
 #include <Adafruit_FT6206.h>
 #include <avr/interrupt.h>
 
-#include "../gps_tracker/gps_tracker.hpp"
+#include "../tracker/gps_tracker.hpp"
 
 // The FT6206 uses hardware I2C (SCL/SDA)
 Adafruit_FT6206 ctp = Adafruit_FT6206();

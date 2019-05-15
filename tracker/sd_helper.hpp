@@ -2,13 +2,74 @@
  * sd_helper.cpp
  *
  *  Created on: May 14, 2019
- *      Author: gotzl
+ *  Most of the functions are taken (or adapted) from the SD_Test included in ESP32-arduino platform
  */
 
 
 #include "FS.h"
 #include "SD.h"
 
+uint16_t createSessionDir(fs::FS &fs) {
+	int16_t session = -1;
+
+    File root = fs.open("/");
+    if(!root){
+        Serial.println("Failed to open root directory");
+        return -1;
+    }
+    if(!root.isDirectory()){
+        Serial.println("Not a directory");
+        return -1;
+    }
+
+    File file = root.openNextFile();
+    File latest_session;
+    while(file){
+        if(file.isDirectory()){
+            if (strncmp("/session", file.name(), 8) == 0) {
+            	int16_t sess=-1;
+            	sscanf(file.name(),"/session%03i", &sess);
+            	if (sess>=0 && sess>session) {
+            		session = sess;
+            		latest_session = file;
+            	}
+            }
+        }
+        file = root.openNextFile();
+    }
+
+    // test if the latest session folder has some content
+    uint16_t n_files=0;
+    if (session>=0) {
+    	File file = latest_session.openNextFile();
+		while(file) {
+			file = file.openNextFile();
+			n_files += 1;
+		}
+
+		// take empty latest session folder
+		if (n_files==0) {
+			Serial.print( F("Taking existing session dir: ") );
+			Serial.println( latest_session.name() );
+			return session;
+		}
+    }
+
+    // create new session folder
+    session += 1;
+
+    char session_dir[11];
+    sprintf(session_dir, "/session%03i",session);
+    Serial.print( F("Creating session dir: ") );
+    Serial.print( session_dir );
+    if(fs.mkdir(session_dir)){
+        Serial.println( F(" ... Success!") );
+    } else {
+        Serial.println( F(" ... Failed!") );
+    }
+
+    return session;
+}
 
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
     Serial.printf("Listing directory: %s\n", dirname);

@@ -13,7 +13,8 @@ A commercial product would be eg [this one](https://www.vboxmotorsport.co.uk/ind
 * Adafruit capacitive touchscreen
 * [Adafruit ultimate GPS shield with SD interface](https://www.adafruit.com/product/1272)
 
-The GPS module might not be accurate enough to realy calculate accurate delta times, but its cheap and its enough for early testing. Later those modules might be interesting (suggested in [this article](http://grauonline.de/wordpress/?page_id=1468))
+The GPS module might not be accurate enough to realy calculate accurate delta times, but its cheap and its enough for early testing. 
+Later, following modules might be interesting (suggested in [this article](http://grauonline.de/wordpress/?page_id=1468)):
 http://www.unicorecomm.com/en/product/content_1611.html
 https://www.ardusimple.com/product/simplertk2b/
 
@@ -22,6 +23,7 @@ https://www.ardusimple.com/product/simplertk2b/
 The idea is to split work on two devices:
 * ESP32s takes care of the GPS tracking and corresponding calculations as well as handling SD card data
 * Leonardo to work the display
+
 The two devices communicate via a very simple binary protocol over Serial port.
 
 ![alt text](resources/IMG_20190515_114456.jpg "The assembled tracker decoding test NMEA data fed from PC")
@@ -35,7 +37,7 @@ The two devices communicate via a very simple binary protocol over Serial port.
 
 
 ## Development:
-Eclipse IDE, using avrdude_autoreset_wrapper to be able to flash the Leonardo.
+Eclipse IDE with the following platforms/libraries
 
 ### Platforms:
 * arduino
@@ -50,5 +52,5 @@ Eclipse IDE, using avrdude_autoreset_wrapper to be able to flash the Leonardo.
 
 (SD library is already included in esp32 platform!)
 
-
+Note: To be able to flash the Leonardo from within Eclipse, one neeeds [avrdude_autoreset_wrapper](https://github.com/gotzl/avrdude_autoreset_wrapper).
 
