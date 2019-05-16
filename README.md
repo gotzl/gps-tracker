@@ -4,12 +4,31 @@ This is a small R&D project intendet to familiarize myself with programming of M
 The goal is to create a GPS tracker and LapTimer that records laps performed at a race track and shows the delta time to the fastest lap.
 The code is currently very messy and might get some cleanup at a later point.
 
+## Features:
+### Implemented
+* define start/finish line
+* detect start/finish crossing to start/end a lap
+* show laptime, lap number and various other information
+* show delta time to reference lap (with number and a red/green bar)
+* save completed laps to SD card in a structured manner
+* connect to WiFi and offer WebServer to retrieve recorded laps from the tracker
+* analyse recorded laps in python on PC
+* OTA update over wifi
+
+### Planned
+* navigation via touchscreen through a menu to allow 
+	* loading a specific reference from SD
+	* loading a predifine start/finish line location
+	* setting up the WiFi connection
+* record analog inputs (ie for break/gas pedal)
+* get a proper GPS antenna
+
 A commercial product would be eg [this one](https://www.vboxmotorsport.co.uk/index.php/de/products/performance-meters/vbox-laptimer).
 
 
 ## Parts:
 * [NodeMCU-32s](https://hackaday.com/2016/09/15/esp32-hands-on-awesome-promise/)
-* Arudino Leonardo
+* Arduino Leonardo
 * Adafruit capacitive touchscreen
 * [Adafruit ultimate GPS shield with SD interface](https://www.adafruit.com/product/1272)
 
@@ -42,6 +61,8 @@ Eclipse IDE with the following platforms/libraries
 ### Platforms:
 * arduino
 * esp32
+	* FFat, FS, SD, SPI
+	* Update, WebServer, WiFi (needs [this fix](https://github.com/espressif/arduino-esp32/issues/1327#issuecomment-435839829))
 
 ### Libraries:
 * Adafruit FT6206
