@@ -6,7 +6,7 @@
 #include "gps_tracker.hpp"
 #include "protocol.hpp"
 
-#define DEBUG
+//#define DEBUG
 
 
 //#define NMEAGPS_PARSE_SATELLITES
@@ -54,13 +54,15 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 //------------------------------------------------------------
 
 // stuff needed for keeping track of past locations
-const int32_t MAX_TRACK_POINTS = 8000;
+const uint16_t MAX_TRACK_POINTS = 5000;
+const char* tmp_lap = "/tmp/lap.bin";
 _track track_ref;
 _point* track;
 int32_t ref_idx = -1, fix_time_millis = 0;
 uint32_t speed[32]; // speed in m/h
 uint16_t dist[32];  // distance to start/finish in m
 int16_t ori[32];    // orientation to start/finish in degrees
+uint16_t tmp_cnt = 0;
 
 bool has_ref = false, valid_lap = false;
 bool moving = false, has_sd = false;
@@ -88,7 +90,11 @@ int32_t nextIdx(NeoGPS::Location_t pnt, int32_t current, uint32_t limit) {
 	int32_t idx;
 
 	for (uint32_t i = current; i < min(limit, track_ref.meta.points); i++) {
-		distance = pnt.DistanceKm(track_ref.track[i].location);
+		if (i>track_ref.points_loaded) {
+			track_ref.points_offset = track_ref.points_loaded;
+			track_ref.points_loaded = loadPoints(SD, track_ref, MAX_TRACK_POINTS);
+		}
+		distance = pnt.DistanceKm(track_ref.track[i-track_ref.points_offset].location);
 		if (i == 0 || distance < closest) {
 			closest = distance;
 			idx = i;
@@ -99,7 +105,7 @@ int32_t nextIdx(NeoGPS::Location_t pnt, int32_t current, uint32_t limit) {
 
 // find closest point to given location in ref track
 int32_t refIdx(NeoGPS::Location_t pnt) {
-	return nextIdx(pnt, 0, track_ref.meta.points / 2);
+	return nextIdx(pnt, 0, track_ref.points_loaded / 2);
 }
 
 bool checkMoving() {
@@ -156,8 +162,22 @@ bool startFinishCrossing() {
 void setAsReference(_track_meta &meta) {
 	DEBUG_PORT.println(F("!! Setting new ref !!"));
 
-	track_ref.meta = meta;
-	memcpy(track_ref.track, track, sizeof(_point) * MAX_TRACK_POINTS);
+	if (tmp_cnt>0) {
+		DEBUG_PORT.print(F("Reading ref from file"));
+		snprintf(track_ref.path, sizeof track_ref.path,
+				"/session%03hi/lap%03hi.bin",
+				meta.session,
+				meta.lap);
+
+		track_ref.points_loaded = loadLap(SD, track_ref, MAX_TRACK_POINTS);
+
+	} else {
+		track_ref.meta = meta;
+		track_ref.points_loaded = meta.points;
+		track_ref.points_offset = 0;
+		memcpy(track_ref.track, track,
+			sizeof(_point) * MAX_TRACK_POINTS);
+	}
 }
 
 int32_t offsetCorrection(NeoGPS::Location_t ref_loc) {
@@ -180,7 +200,45 @@ void handleFixInfo() {
 
 	track[lframe.pts].time = lframe.time;
 	track[lframe.pts].location = fix.location;
+};
+
+_track_meta createMeta() {
+	_track_meta meta;
+	DEBUG_PORT.println(F("Creating meta"));
+
+	meta.points = lframe.pts + MAX_TRACK_POINTS*tmp_cnt;
+	meta.time = lframe.time;
+	meta.start_time = lframe.start_time;
+	meta.finish_time = lframe.finish_time;
+	meta.lap = tframe.lap;
+	meta.session = tframe.session;
+	meta.start_finish = start_finish;
+	return meta;
 }
+
+void createFile(_track_meta &meta) {
+	char name[23];
+	DEBUG_PORT.print(F("Creating file for lap: "));
+
+	snprintf(name, sizeof name,
+			"/session%03hi/lap%03hi.bin",
+			meta.session,
+			meta.lap);
+
+	DEBUG_PORT.println(name);
+	writeFile(SD, name,
+			(uint8_t*) &meta,
+			sizeof(_track_meta));
+
+	DEBUG_PORT.println(F(" ... writing points"));
+	if (tmp_cnt>0)
+		appendFile(SD, name, tmp_lap);
+	appendFile(SD, name,
+			(uint8_t*) track,
+			sizeof(_point) * (meta.points));
+	DEBUG_PORT.println(F(" ... Done."));
+}
+
 
 void doSomeWork() {
 //	DEBUG_PORT.println( F("doSomeWork") );
@@ -190,7 +248,19 @@ void doSomeWork() {
 
 	// exceeded the max storage, reset counter and invalidate lap
 	if (lframe.pts >= MAX_TRACK_POINTS) {
-		valid_lap = false;
+		if (tframe.lap>=0) {
+			if (tmp_cnt == 0)
+				writeFile(SD, tmp_lap,
+						(uint8_t*) track,
+						sizeof(_point) * (lframe.pts));
+			else
+				appendFile(SD, tmp_lap,
+						(uint8_t*) track,
+						sizeof(_point) * (lframe.pts));
+
+			tmp_cnt += 1;
+		}
+
 		lframe.pts = 0;
 	}
 
@@ -214,39 +284,16 @@ void doSomeWork() {
 			offset = offsetCorrection(start_finish);
 
 			if (valid_lap) {
-				_track_meta meta;
-				char name[23];
 
 				lframe.finish_time = fix_time_millis + offset;
 
-				if (tframe.session < 0)
-					tframe.session = createSessionDir(SD);
-
-				DEBUG_PORT.println(F("Creating meta"));
-
-				meta.points = lframe.pts;
-				meta.time = lframe.time;
-				meta.start_time = lframe.start_time;
-				meta.finish_time = lframe.finish_time;
-				meta.lap = tframe.lap;
-				meta.session = tframe.session;
-				meta.start_finish = start_finish;
-
-				DEBUG_PORT.print(F("Creating file for lap: "));
-
-				snprintf(name, sizeof name, "/session%03hi/lap%03hi.bin", meta.session, meta.lap);
-				DEBUG_PORT.println(name);
-				writeFile(SD, name, (uint8_t*) &meta, sizeof(_track_meta));
-				DEBUG_PORT.println(F(" ... writing points"));
-				appendFile(SD, name, (uint8_t*) track, sizeof(_point) * (meta.points));
-				DEBUG_PORT.println(F(" ... Done."));
+				_track_meta meta = createMeta();
+				createFile(meta);
 
 				if (!has_ref/*or faster*/) {
 					setAsReference(meta);
 					has_ref = true;
 				}
-
-				tframe.lap++;
 			}
 
 			valid_lap = true;
@@ -257,10 +304,16 @@ void doSomeWork() {
 			speed[0] = speed[lframe.pts % 32];
 			track[0] = track[lframe.pts];
 
+
+			if (tframe.session < 0)
+				tframe.session = createSessionDir(SD);
+			tframe.lap++;
+
 			lframe.pts = 0;
 			lframe.time = -offset;
 			lframe.start_time = fix_time_millis + offset;
 			ref_idx = -1;
+			tmp_cnt = 0;
 		}
 
 		if (has_ref) {
@@ -271,8 +324,8 @@ void doSomeWork() {
 				ref_idx = nextIdx(fix.location, ref_idx, ref_idx + 100);
 
 			if (ref_idx >= 0) {
-				delta = offsetCorrection(track_ref.track[ref_idx].location);
-				lframe.delta = lframe.time - track_ref.track[ref_idx].time + delta;
+				delta = offsetCorrection(track_ref.track[ref_idx - track_ref.points_offset].location);
+				lframe.delta = lframe.time - track_ref.track[ref_idx - track_ref.points_offset].time + delta;
 			}
 		}
 
@@ -330,6 +383,8 @@ void setup_tracker() {
 	lframe.pts = 0;
 	lframe.time = 0;
 	lframe.delta = 0;
+
+	createDir(SD, "/tmp/");
 }
 
 bool check_WiFi(uint16_t thresh) {
@@ -448,8 +503,11 @@ void loop() {
 	if (incomingByte > 0) {
 		if (incomingByte == 1) {
 			lframe.pts = 0;
+			tmp_cnt = 0;
+
 			valid_lap = false;
 			has_ref = false;
+			lframe.time = 0;
 
 			start_finish = fix.location;
 		}

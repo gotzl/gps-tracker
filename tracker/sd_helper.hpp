@@ -81,6 +81,55 @@ int16_t createSessionDir(fs::FS &fs) {
     return session;
 }
 
+
+uint32_t loadLap(fs::FS &fs, _track &track_ref, uint32_t limit){
+    Serial.printf("Reading file: %s\n", track_ref.path);
+    int ret = -1;
+
+    File file = fs.open(track_ref.path);
+    if(!file){
+        Serial.println("Failed to open file for reading");
+        return ret;
+    }
+
+    Serial.print("Read from file: ");
+    while(file.available()){
+        file.read((uint8_t*) &(track_ref.meta),
+    			sizeof(_track_meta));
+        ret = min(track_ref.meta.points, limit);
+        file.read((uint8_t*) &(track_ref.track),
+        		sizeof(_point) * ret);
+    }
+    file.close();
+    return ret;
+}
+
+
+uint32_t loadPoints(fs::FS &fs, _track &track_ref, uint32_t limit){
+    Serial.printf("Reading file: %s\n", track_ref.path);
+    int ret = -1;
+
+    File file = fs.open(track_ref.path);
+    if(!file){
+        Serial.println("Failed to open file for reading");
+        return ret;
+    }
+
+    Serial.print("Read from file: ");
+    while(file.available()){
+        uint32_t pos = sizeof(_track_meta) + track_ref.points_loaded * sizeof(_point);
+
+        ret = min(track_ref.meta.points, pos + limit);
+
+        file.seek(pos);
+        file.read((uint8_t*) &(track_ref.track),
+        		sizeof(_point) * (ret-pos));
+    }
+    file.close();
+    return ret;
+}
+
+
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
     Serial.printf("Listing directory: %s\n", dirname);
 
@@ -177,6 +226,29 @@ void appendFile(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
     }
     file.close();
 }
+
+void appendFile(fs::FS &fs, const char * path, const char * source){
+    Serial.printf("Appending content of %s to file: %s\n", source, path);
+
+    File file = fs.open(path, FILE_APPEND);
+    if(!file){
+        Serial.println( F("Failed to open file for appending") );
+        return;
+    }
+    File sfile = fs.open(source, FILE_READ);
+    if(!sfile){
+        Serial.println( F("Failed to open file for appending") );
+        return;
+    }
+    if(file.write(sfile.read())){
+        Serial.println( F("Message appended") );
+    } else {
+        Serial.println( F("Append failed") );
+    }
+    sfile.close();
+    file.close();
+}
+
 
 void renameFile(fs::FS &fs, const char * path1, const char * path2){
     Serial.printf("Renaming file %s to %s\n", path1, path2);

@@ -38,6 +38,7 @@ struct _location {
 struct _point
 {
 	uint32_t        time;
+	uint32_t        speed;
 	_location		location;
 };
 
@@ -54,7 +55,10 @@ struct _track_meta
 
 struct _track
 {
+	char path[128];
 	_track_meta meta;
+	uint32_t points_loaded;
+	uint32_t points_offset;
 	_point* track;
 };
 
