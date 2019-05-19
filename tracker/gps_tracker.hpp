@@ -1,6 +1,8 @@
 
 #if !defined(TEST) && !defined(PYTHON)
 #include <Arduino.h>
+#include "Location.h"
+typedef NeoGPS::Location_t _location;
 #endif
 
 
@@ -24,51 +26,19 @@ typedef unsigned int uint32_t;
 
 #if defined(TEST) || defined(PYTHON)
 #define PI 3.1415926535897932384626433832795
+struct _location {
+    int32_t       _lat;  // degrees * 1e7, negative is South
+    int32_t       _lon;  // degrees * 1e7, negative is West
+};
 #endif
 
 //------------------------------------------------------------
 
-#define BEGIN_LFRAME 	0x80
-#define BEGIN_TFRAME 	0xC0
-#define BEGIN_GFRAME 	0xE0
-
-struct tFrame {
-	uint8_t seconds;    //!< 00-59
-	uint8_t minutes;    //!< 00-59
-	uint8_t hours;      //!< 00-23
-	uint8_t day;        //!< 01-07 Day of Week
-	uint8_t date;       //!< 01-31 Day of Month
-	uint8_t month;      //!< 01-12
-	uint8_t year;       //!< 00-99
-};
-
-struct gFrame {
-	float speed;
-	int32_t lon;
-	int32_t lat;
-	uint16_t bearing;
-	uint8_t sats;
-	uint8_t fix;
-};
-
-struct lFrame{
-	float dist_start;
-	uint32_t start_time;
-	uint32_t finish_time;
-	int32_t delta;
-	uint32_t time;
-	uint32_t pts;
-	uint8_t lap;
-	uint8_t stat;
-};
-
-//------------------------------------------------------------
 
 struct _point
 {
-	uint32_t         time;
-    int32_t       lat;  // degrees * 1e7, negative is South
-    int32_t       lon;  // degrees * 1e7, negative is West
+	uint32_t        time;
+	_location		location;
 };
 
 struct _track_meta
@@ -77,8 +47,7 @@ struct _track_meta
 	uint32_t start_time;
 	uint32_t finish_time;
 	uint32_t time;
-	int32_t start_finish_lat;
-	int32_t start_finish_lon;
+	_location start_finish;
 	int16_t lap;
 	int16_t session;
 };
@@ -99,12 +68,12 @@ int mod(int32_t a, int32_t b)
 }
 
 //------------------------------------------------------------
-float orientation(float heading, float bearing) {
+int16_t orientation(int16_t heading, int16_t bearing) {
 	return mod(bearing - heading + 180, 360) - 180;
 }
 
-int32_t offsetCorrection(float heading, float distance, float speed, float bearing) {
-	static int32_t delta, ori;
+int16_t offsetCorrection(float heading, float distance, float speed, float bearing) {
+	static int16_t delta, ori;
 
 	// delta to travel from ref_loc to current loc
 	delta = ((distance/speed)*60*60*1000);
@@ -161,19 +130,21 @@ PYBIND11_MODULE(example, m) {
     m.def("orientation",&orientation,"blablup");
     m.def("readTrackMeta",&readTrackMeta,"blablup");
     m.def("readTrack",&readTrack,"blablup");
+    py::class_<_location>(m, "_location")
+        .def(py::init<>())
+		.def_readwrite("lon", &_location::_lon)
+		.def_readwrite("lat", &_location::_lat);
     py::class_<_point>(m, "_point")
         .def(py::init<>())
 		.def_readwrite("time", &_point::time)
-		.def_readwrite("lat", &_point::lat)
-		.def_readwrite("lon", &_point::lon);
+		.def_readwrite("location", &_point::location);
     py::class_<_track_meta>(m, "_track_meta")
         .def(py::init<>())
 		.def_readwrite("points", &_track_meta::points)
 		.def_readwrite("start_time", &_track_meta::start_time)
 		.def_readwrite("finish_time", &_track_meta::finish_time)
 		.def_readwrite("time", &_track_meta::time)
-		.def_readwrite("start_finish_lat", &_track_meta::start_finish_lat)
-		.def_readwrite("start_finish_lon", &_track_meta::start_finish_lon)
+		.def_readwrite("start_finish", &_track_meta::start_finish)
 		.def_readwrite("lap", &_track_meta::lap)
 		.def_readwrite("session", &_track_meta::session);
 }

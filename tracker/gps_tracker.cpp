@@ -4,11 +4,16 @@
 #define RX1 0
 
 #include "gps_tracker.hpp"
+#include "protocol.hpp"
+
+#define DEBUG
+
 
 //#define NMEAGPS_PARSE_SATELLITES
 #include <NMEAGPS.h>
 
 #include <Adafruit_GPS.h>
+#define PMTK_SET_NAVSPEED_THRESHOLD_04 "$PMTK386,0.4*39"
 #define PMTK_SET_NAVSPEED_THRESHOLD_06 "$PMTK386,0.6*3B"
 #define PMTK_SET_BAUD_115200 "$PMTK251,115200*1F"
 //Adafruit_GPS GPS(&Serial1);
@@ -19,7 +24,6 @@
 #include "sd_helper.hpp"
 #include "webserver_helper.hpp"
 
-//#define DEBUG
 #define GPS_PORT_NAME "Serial"
 
 #define DEBUG_PORT Serial
@@ -53,9 +57,10 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 const int32_t MAX_TRACK_POINTS = 8000;
 _track track_ref;
 _point* track;
-int32_t ref_idx = -1,delta = 0, fix_time_millis = 0;
-int16_t session = -1;
-float dist[32], speed[32], ori[32];
+int32_t ref_idx = -1, fix_time_millis = 0;
+uint32_t speed[32]; // speed in m/h
+uint16_t dist[32];  // distance to start/finish in m
+int16_t ori[32];    // orientation to start/finish in degrees
 
 bool has_ref = false, valid_lap = false;
 bool moving = false, has_sd = false;
@@ -83,7 +88,7 @@ int32_t nextIdx(NeoGPS::Location_t pnt, int32_t current, uint32_t limit) {
 	int32_t idx;
 
 	for (uint32_t i = current; i < min(limit, track_ref.meta.points); i++) {
-		distance = pnt.DistanceKm(NeoGPS::Location_t(track_ref.track[i].lat, track_ref.track[i].lon));
+		distance = pnt.DistanceKm(track_ref.track[i].location);
 		if (i == 0 || distance < closest) {
 			closest = distance;
 			idx = i;
@@ -105,22 +110,22 @@ bool checkMoving() {
 
 	i = lframe.pts - samples;
 	for (; i < lframe.pts; i++)
-		cnt += speed[i % 32] > 3;
+		cnt += speed[i % 32] > 3000;
 
 	return cnt > thresh;
 }
 
-float orientationThreshold(float dist) {
+uint16_t orientationThreshold(uint16_t dist) {
 	// orientation is good for far distances and bad for close distances (lever arm ...)
-	return min(90., max(30., 90. - (dist - 20)));
+	return min(90, max(30, 90 - (dist - 20)));
 }
 
 bool startFinishCrossing() {
 	if (lframe.pts < 1)
 		return false;
 
-	float a = orientationThreshold(dist[lframe.pts % 32]);
-	float b = orientationThreshold(dist[(lframe.pts - 1) % 32]);
+	uint16_t a = orientationThreshold(dist[lframe.pts % 32]);
+	uint16_t b = orientationThreshold(dist[(lframe.pts - 1) % 32]);
 
 	// start/finish is front
 	if (abs(ori[lframe.pts % 32]) < a)
@@ -132,11 +137,16 @@ bool startFinishCrossing() {
 	if (abs(ori[(lframe.pts - 1) % 32]) <= b) {
 		// if one of the two inspected points is reasonably close to
 		// start/finish, we've crossed it
-		float dist_thresh = min(50., max(15., .5 * speed[lframe.pts % 32] / 3.6));
-//		DEBUG_PORT.print("Ori flip ");
-//		DEBUG_PORT.print(a); DEBUG_PORT.print(", ");
-//		DEBUG_PORT.print(b); DEBUG_PORT.print(", ");
-//		DEBUG_PORT.println(dist_thresh);
+		uint16_t dist_thresh = min(
+				uint16_t(50), max(uint16_t(15),
+						(uint16_t) (speed[lframe.pts % 32] / (3600/2)) )); // distance covered in 0.5s in meters
+
+		DEBUG_PORT.print("Ori flip ");
+		DEBUG_PORT.print(ori[(lframe.pts) % 32]); DEBUG_PORT.print(", ");
+		DEBUG_PORT.print(ori[(lframe.pts - 1) % 32]); DEBUG_PORT.print(", ");
+		DEBUG_PORT.print(a); DEBUG_PORT.print(", ");
+		DEBUG_PORT.print(b); DEBUG_PORT.print(", ");
+		DEBUG_PORT.println(dist_thresh);
 		return dist[lframe.pts % 32] < dist_thresh || dist[(lframe.pts - 1) % 32] < dist_thresh;
 	}
 
@@ -151,13 +161,17 @@ void setAsReference(_track_meta &meta) {
 }
 
 int32_t offsetCorrection(NeoGPS::Location_t ref_loc) {
-	return offsetCorrection(fix.heading(), fix.location.DistanceKm(ref_loc), fix.speed_kph(), fix.location.BearingToDegrees(ref_loc));
+	return offsetCorrection(
+			fix.heading(),
+			fix.location.DistanceKm(ref_loc),
+			fix.speed_kph(),
+			fix.location.BearingToDegrees(ref_loc));
 }
 
 void handleFixInfo() {
 	ori[lframe.pts % 32] = orientation(fix.heading(), fix.location.BearingToDegrees(start_finish));
 	dist[lframe.pts % 32] = fix.location.DistanceKm(start_finish) * 1000;
-	speed[lframe.pts % 32] = fix.speed_kph();
+	speed[lframe.pts % 32] = fix.speed_kph() * 1000;
 
 	fix_time_millis = ((uint32_t) fix.dateTime) * 1000 + (fix.dateTime_ms() % 1000);
 
@@ -165,15 +179,14 @@ void handleFixInfo() {
 		lframe.time = fix_time_millis - lframe.start_time;
 
 	track[lframe.pts].time = lframe.time;
-	track[lframe.pts].lon = fix.longitudeL();
-	track[lframe.pts].lat = fix.latitudeL();
+	track[lframe.pts].location = fix.location;
 }
 
 void doSomeWork() {
 //	DEBUG_PORT.println( F("doSomeWork") );
 	static bool warned = false; // that we're waiting for a valid location
 	static bool start_finish_crossing;
-	static uint32_t offset;
+	static int16_t offset, delta = 0;
 
 	// exceeded the max storage, reset counter and invalidate lap
 	if (lframe.pts >= MAX_TRACK_POINTS) {
@@ -186,16 +199,16 @@ void doSomeWork() {
 		handleFixInfo();
 		start_finish_crossing = startFinishCrossing();
 
-		if (!checkMoving()) {
-			// we have stopped, what do we do? invalidate lap ?
-			if (moving) {
-			}
-			moving = false;
+//		if (!checkMoving()) {
+//			// we have stopped, what do we do? invalidate lap ?
+//			if (moving) {
+//			}
+//			moving = false;
+//
+//		} else
+//			moving = true;
 
-		} else
-			moving = true;
-
-		if (start_finish_crossing && moving) {
+		if (start_finish_crossing && lframe.pts > 50) {
 			DEBUG_PORT.println(F("!! Start/Finish crossing !!"));
 
 			offset = offsetCorrection(start_finish);
@@ -206,8 +219,8 @@ void doSomeWork() {
 
 				lframe.finish_time = fix_time_millis + offset;
 
-				if (session < 0)
-					session = createSessionDir(SD);
+				if (tframe.session < 0)
+					tframe.session = createSessionDir(SD);
 
 				DEBUG_PORT.println(F("Creating meta"));
 
@@ -215,10 +228,9 @@ void doSomeWork() {
 				meta.time = lframe.time;
 				meta.start_time = lframe.start_time;
 				meta.finish_time = lframe.finish_time;
-				meta.lap = lframe.lap;
-				meta.session = session;
-				meta.start_finish_lat = start_finish.lat();
-				meta.start_finish_lon = start_finish.lon();
+				meta.lap = tframe.lap;
+				meta.session = tframe.session;
+				meta.start_finish = start_finish;
 
 				DEBUG_PORT.print(F("Creating file for lap: "));
 
@@ -234,7 +246,7 @@ void doSomeWork() {
 					has_ref = true;
 				}
 
-				lframe.lap++;
+				tframe.lap++;
 			}
 
 			valid_lap = true;
@@ -259,10 +271,7 @@ void doSomeWork() {
 				ref_idx = nextIdx(fix.location, ref_idx, ref_idx + 100);
 
 			if (ref_idx >= 0) {
-
-				NeoGPS::Location_t ref_loc = NeoGPS::Location_t(track_ref.track[ref_idx].lat, track_ref.track[ref_idx].lon);
-
-				delta = offsetCorrection(ref_loc);
+				delta = offsetCorrection(track_ref.track[ref_idx].location);
 				lframe.delta = lframe.time - track_ref.track[ref_idx].time + delta;
 			}
 		}
@@ -282,23 +291,20 @@ void doSomeWork() {
 void setup_gps() {
 	// 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
 	gpsPort.begin(9600);
-//	gpsPort.println(PMTK_SET_BAUD_57600);
-//	gpsPort.end();
-//	gpsPort.begin(57600);
+	gpsPort.println(PMTK_SET_BAUD_57600);
+	gpsPort.end();
 
-	// uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
+	delay(1000);
+
+	gpsPort.begin(57600);
+	gpsPort.setRxBufferSize(2048);
+
 	gpsPort.println(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-	// uncomment this line to turn on only the "minimum recommended" data
-	//GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
-	// For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
-	// the parser doesn't care about other sentences at this time
-	// Set the update rate
-	gpsPort.println(PMTK_SET_NMEA_UPDATE_10HZ); // 1 Hz update rate
-	// For the parsing code to work nicely and have time to sort thru the data, and
-	// print it out we don't suggest using anything higher than 1 Hz
 
+	gpsPort.println(PMTK_SET_NMEA_UPDATE_10HZ);
 	gpsPort.println(PMTK_API_SET_FIX_CTL_5HZ);
-	gpsPort.println(PMTK_SET_NAVSPEED_THRESHOLD_06);
+
+	gpsPort.println(PMTK_SET_NAVSPEED_THRESHOLD_04);
 
 	// Request updates on antenna status, comment out to keep quiet
 	gpsPort.println(PGCMD_ANTENNA);
@@ -318,26 +324,20 @@ void setup_tracker() {
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
 	// set some defaults
-	lframe.lap = 0;
+	tframe.lap = -1;
+	tframe.session = -1;
+
 	lframe.pts = 0;
 	lframe.time = 0;
 	lframe.delta = 0;
 }
 
-bool setup_WiFi() {
-	if (!WiFi.config(local_IP, gateway, subnet)) {
-		DEBUG_PORT.println("STA Failed to configure");
-	}
-
-	DEBUG_PORT.print("Connecting to ");
-	DEBUG_PORT.println(ssid);
-
-	WiFi.begin(ssid, password);
-
+bool check_WiFi(uint16_t thresh) {
 	uint16_t cnt=0;
 	while (WiFi.status() != WL_CONNECTED) {
-		if (cnt>20)
+		if (cnt>thresh)
 			return false;
+
 		delay(500);
 		DEBUG_PORT.print(".");
 		cnt +=1;
@@ -359,6 +359,18 @@ bool setup_WiFi() {
 	return true;
 }
 
+bool setup_WiFi() {
+	if (!WiFi.config(local_IP, gateway, subnet)) {
+		DEBUG_PORT.println("STA Failed to configure");
+	}
+
+	DEBUG_PORT.print("Connecting to ");
+	DEBUG_PORT.println(ssid);
+
+	WiFi.begin(ssid, password);
+	return check_WiFi(20);
+}
+
 void IRAM_ATTR onTimer();
 void setup() {
 	DEBUG_PORT.begin(115200);
@@ -371,18 +383,18 @@ void setup() {
   setup_gps();
 #endif
 
-
 	DEBUG_PORT.printf("\n\navailable heap %i\n", ESP.getFreeHeap());
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
 	// do this first to allow reserving large chunks of connected memory
 	setup_tracker();
 
 	DEBUG_PORT.printf("\n\navailable heap %i\n", ESP.getFreeHeap());
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
+	pinMode(LED_BUILTIN, OUTPUT);
 	has_wifi = setup_WiFi();
-	if (has_wifi)
-		ws_running = setup_webserver();
+	ws_running = setup_webserver();
 
 	DEBUG_PORT.printf("\n\navailable heap %i\n", ESP.getFreeHeap());
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -393,24 +405,41 @@ void setup() {
 
 	timer = timerBegin(1, 80, true); // count in microseconds
 	timerAttachInterrupt(timer, &onTimer, true);
-	timerAlarmWrite(timer, 100000, true); // every tenth of a second
+	timerAlarmWrite(timer, 1000000, true); // every second
 	timerAlarmEnable(timer);
 
 	DEBUG_PORT.printf("\n\navailable heap %i\n", ESP.getFreeHeap());
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+	gps.overrun(false);
 }
 
 
 void loop() {
 	static int incomingByte = 0;
+	bool gps_valid = false;
 
 	// handle gps data
-	while (gps.available( gpsPort)) {
+	while (gps.available( gpsPort )) {
 		fix = gps.read();
 		doSomeWork();
+		gps_valid = true;
 	}
 
-	server.handleClient();
+	if (gps_valid) {
+		lframe.dist_start = 0;
+		if (fix.valid.location)
+			lframe.dist_start = dist[lframe.pts % 32];
+
+		displayPort.write(BEGIN_LFRAME);
+		displayPort.write((uint8_t*) &lframe, sizeof lframe);
+	}
+
+	if (ws_running && has_wifi) {
+//		portENTER_CRITICAL_ISR(&timerMux);
+		server.handleClient();
+//		portEXIT_CRITICAL(&timerMux);
+	}
 
 	// handle incoming commands
 	while (displayPort.available())
@@ -419,7 +448,6 @@ void loop() {
 	if (incomingByte > 0) {
 		if (incomingByte == 1) {
 			lframe.pts = 0;
-			lframe.lap = 0;
 			valid_lap = false;
 			has_ref = false;
 
@@ -439,24 +467,10 @@ void loop() {
 }
 
 void IRAM_ATTR onTimer() {
-	static int8_t cnt = 0;
 	portENTER_CRITICAL_ISR(&timerMux);
 	interruptCounter++;
 
-	if (cnt % 2) {
-		{
-//			DEBUG_PORT.println( F("Lap frame") );
-			lframe.stat = moving << 3 | valid_lap << 2 | has_ref << 1 | has_sd;
-			lframe.dist_start = 0;
-			if (fix.valid.location)
-				lframe.dist_start = fix.location.DistanceKm(start_finish) * 1000;
-
-			displayPort.write(BEGIN_LFRAME);
-			displayPort.write((uint8_t*) &lframe, sizeof lframe);
-		}
-	}
-
-	if (cnt == 1) {
+//	if (cnt == 1) {
 		{
 //			DEBUG_PORT.println( F("Time frame") );
 			tframe.seconds = fix.dateTime.seconds;
@@ -467,20 +481,18 @@ void IRAM_ATTR onTimer() {
 			tframe.month = fix.dateTime.month;
 			tframe.year = fix.dateTime.year;
 
+			tframe.stat = moving << 3 | valid_lap << 2 | has_ref << 1 | has_sd;
+
 			displayPort.write(BEGIN_TFRAME);
 			displayPort.write((uint8_t*) &tframe, sizeof tframe);
 		}
-//	}
-
-//	if (cnt==1) {
 		{
 //			DEBUG_PORT.println( F("GPS frame") );
 			gframe.sats = fix.satellites;
 			gframe.fix = fix.valid.location;
 			gframe.bearing = 0;
 			if (lframe.pts > 5) {
-				NeoGPS::Location_t prev(track[lframe.pts - 5].lat, track[lframe.pts - 5].lon);
-				gframe.bearing = fix.location.BearingTo(prev) * NeoGPS::Location_t::DEG_PER_RAD;
+				gframe.bearing = fix.location.BearingTo(track[lframe.pts - 5].location) * NeoGPS::Location_t::DEG_PER_RAD;
 			}
 			gframe.lon = 0;
 			gframe.lat = 0;
@@ -488,18 +500,23 @@ void IRAM_ATTR onTimer() {
 			if (fix.valid.location) {
 				gframe.lon = fix.location._lon;
 				gframe.lat = fix.location._lat;
-				gframe.speed = fix.speed_kph();
+				gframe.speed = fix.speed_kph()*1000;
 			}
 			displayPort.write(BEGIN_GFRAME);
 			displayPort.write((uint8_t*) &gframe, sizeof gframe);
 		}
-	}
+//	}
+//
+//	cnt++;
+//	if (cnt > 10)
+//		cnt = 0;
+//
+//	if (cnt == 1) {
+		has_wifi = WiFi.status() == WL_CONNECTED;
+		digitalWrite(LED_BUILTIN, has_wifi?HIGH:LOW);
 
-	cnt++;
-	if (cnt > 10)
-		cnt = 0;
+	if (false) {
 
-	if (cnt == 1) {
 		DEBUG_PORT.print(F("GPS location at "));
 		DEBUG_PORT.print(fix.dateTime.hours);
 		DEBUG_PORT.print(':');
@@ -513,7 +530,7 @@ void IRAM_ATTR onTimer() {
 		DEBUG_PORT.println(F(" satellites."));
 
 		DEBUG_PORT.print(F("Lap: "));
-		DEBUG_PORT.print(lframe.lap);
+		DEBUG_PORT.print(tframe.lap);
 		DEBUG_PORT.print(F(" n_points: "));
 		DEBUG_PORT.print(lframe.pts);
 		DEBUG_PORT.print(F(" time: "));
@@ -530,7 +547,11 @@ void IRAM_ATTR onTimer() {
 		DEBUG_PORT.print(F(" valid? "));
 		DEBUG_PORT.print(valid_lap);
 		DEBUG_PORT.print(F(" has ref? "));
-		DEBUG_PORT.println(has_ref);
+		DEBUG_PORT.print(has_ref);
+		DEBUG_PORT.print(F(" overrun? "));
+		DEBUG_PORT.println(gps.overrun());
+		gps.overrun(false);
+
 		if (fix.valid.location) {
 			DEBUG_PORT.print(F("Current loc / speed: "));
 			DEBUG_PORT.print(fix.latitudeL());
@@ -541,7 +562,7 @@ void IRAM_ATTR onTimer() {
 			DEBUG_PORT.println("km/h");
 
 			DEBUG_PORT.print(F("Dist start/finish: "));
-			DEBUG_PORT.print(fix.location.DistanceKm(start_finish) * 1000, 2);
+			DEBUG_PORT.print(dist[lframe.pts % 32], 2);
 			DEBUG_PORT.print('m');
 			DEBUG_PORT.print(F(" ref idx: "));
 			DEBUG_PORT.println(ref_idx);
@@ -555,7 +576,7 @@ void IRAM_ATTR onTimer() {
 //			DEBUG_PORT.println(fix.heading());
 
 			if (ref_idx >= 0) {
-				NeoGPS::Location_t ref(track_ref.track[ref_idx].lat, track_ref.track[ref_idx].lon);
+				NeoGPS::Location_t &ref = track_ref.track[ref_idx].location;
 				DEBUG_PORT.print(F("Dist: "));
 				DEBUG_PORT.print(fix.location.DistanceKm(ref) * 1000);
 				DEBUG_PORT.print('m');
@@ -566,8 +587,6 @@ void IRAM_ATTR onTimer() {
 				DEBUG_PORT.print(fix.location.BearingToDegrees(ref));
 				DEBUG_PORT.print(F(" delta: "));
 				DEBUG_PORT.print(lframe.delta);
-				DEBUG_PORT.print(F(" dist_delta: "));
-				DEBUG_PORT.print(delta);
 				DEBUG_PORT.println();
 			}
 		}

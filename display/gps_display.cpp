@@ -5,7 +5,7 @@
 #include <Adafruit_FT6206.h>
 #include <avr/interrupt.h>
 
-#include "../tracker/gps_tracker.hpp"
+#include "../tracker/protocol.hpp"
 
 // The FT6206 uses hardware I2C (SCL/SDA)
 Adafruit_FT6206 ctp = Adafruit_FT6206();
@@ -45,8 +45,8 @@ static TS_Point p;
 #define SATS_X_OFFSET 60
 #define FIX_X 100
 #define FIX_Y 220
-#define FIX_X_OFFSET 60
-#define SPD_X 120
+#define FIX_X_OFFSET 50
+#define SPD_X 100
 #define SPD_Y 220
 #define SPD_X_OFFSET 80
 #define BEAR_X 180
@@ -56,9 +56,9 @@ static TS_Point p;
 #define LAP_X 0
 #define LAP_Y 20
 #define LAP_X_OFFSET 50
-#define TIME_X 100
+#define TIME_X 120
 #define TIME_Y 20
-#define TIME_X_OFFSET 80
+#define TIME_X_OFFSET 60
 #define DELTA_X 100
 #define DELTA_Y 100
 #define DELTA_X_OFFSET 100
@@ -117,10 +117,6 @@ void updateLapData() {
 	static float max_delta = 500, min_delta = 500;
 	tft.setRotation(1);
 
-	tft.setCursor(LAP_X+LAP_X_OFFSET, LAP_Y);
-	sprintf(value, "%02i", lframe.lap);
-	tft.print(value);
-
 	{
 		tft.setCursor(TIME_X+TIME_X_OFFSET, TIME_Y);
 		uint16_t s = lframe.time/1000;
@@ -176,18 +172,8 @@ void updateLapData() {
 	tft.print(value);
 
 	tft.setCursor(DIST_X+DIST_X_OFFSET, DIST_Y);
-	{
-		char str_temp[6];
-		dtostrf(lframe.dist_start, 5, 2, str_temp);
-		sprintf(value, "%05sm", str_temp);
-	}
+	sprintf(value, "%04um", lframe.dist_start);
 	tft.print(value);
-
-	tft.setCursor(STAT_X+STAT_X_OFFSET, STAT_Y+20);
-	tft.print(lframe.stat>>3&0x1);
-	tft.print(lframe.stat>>2&0x1);
-	tft.print(lframe.stat>>1&0x1);
-	tft.print(lframe.stat&0x1);
 
 	lvalid = false;
 }
@@ -204,11 +190,9 @@ void updateGpsData() {
 	tft.print(gframe.fix);
 
 	tft.setCursor(SPD_X+SPD_X_OFFSET, SPD_Y);
-	{
-		char str_temp[6];
-		dtostrf(gframe.speed, 5, 2, str_temp);
-		sprintf(value, "%05skm/h", str_temp);
-	}
+	sprintf(value, "%03i.%03ikm/h",
+			gframe.speed/1000,
+			gframe.speed%1000);
 	tft.print(value);
 
 	tft.setCursor(BEAR_X+BEAR_X_OFFSET, BEAR_Y);
@@ -221,10 +205,23 @@ void updateTimeData() {
 	tft.setCursor(0, 0);
 	tft.setRotation(1);
 
+
 	sprintf(value, "%02i-%02i-%02i %02i:%02i:%02i",
 			tframe.date,tframe.month,tframe.year,
 			tframe.hours,tframe.minutes,tframe.seconds);
 	tft.print(value);
+
+
+	tft.setCursor(LAP_X+LAP_X_OFFSET, LAP_Y);
+	sprintf(value, "%02i/%02i", tframe.session, tframe.lap);
+	tft.print(value);
+
+
+	tft.setCursor(STAT_X+STAT_X_OFFSET, STAT_Y+20);
+	tft.print(tframe.stat>>3&0x1);
+	tft.print(tframe.stat>>2&0x1);
+	tft.print(tframe.stat>>1&0x1);
+	tft.print(tframe.stat&0x1);
 
 	tvalid = false;
 }

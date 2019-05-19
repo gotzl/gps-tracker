@@ -30,8 +30,9 @@ int16_t createSessionDir(fs::FS &fs) {
     while(file){
         if(file.isDirectory()){
             if (strncmp("/session", file.name(), 8) == 0) {
-            	int16_t sess=-1;
-            	sscanf(file.name(),"/session%03i", &sess);
+            	int16_t sess=atoi(file.name()+8);
+            	// why does this not work?
+//            	sscanf(file.name(), "/session%3hi", &sess);
             	if (sess>=0 && sess>session) {
             		session = sess;
             		latest_session = file;
