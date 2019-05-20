@@ -29,8 +29,8 @@ A commercial product would be eg [this one](https://www.vboxmotorsport.co.uk/ind
 ## Parts:
 * [NodeMCU-32s](https://hackaday.com/2016/09/15/esp32-hands-on-awesome-promise/)
 * Arduino Leonardo
-* Adafruit capacitive touchscreen
-* [Adafruit ultimate GPS shield with SD interface](https://www.adafruit.com/product/1272)
+* [Adafruit capacitive touchscreen](https://www.adafruit.com/product/1947)
+* [Adafruit ultimate GPS shield with SD slot](https://www.adafruit.com/product/1272)
 
 The GPS module might not be accurate enough to realy calculate accurate delta times, but its cheap and its enough for early testing. 
 Later, following modules might be interesting (suggested in [this article](http://grauonline.de/wordpress/?page_id=1468)):
@@ -61,7 +61,8 @@ Eclipse IDE with the following platforms/libraries
 ### Platforms:
 * arduino
 * esp32
-	* FFat, FS, SD, SPI, EEPROM	* Update, WebServer, WiFi (needs [this fix](https://github.com/espressif/arduino-esp32/issues/1327#issuecomment-435839829))
+	* FFat, FS, SD, SPI, EEPROM
+	* Update, WebServer, WiFi (needs [this fix](https://github.com/espressif/arduino-esp32/issues/1327#issuecomment-435839829))
 
 ### Libraries:
 * Adafruit FT6206
@@ -69,8 +70,6 @@ Eclipse IDE with the following platforms/libraries
 * Adafruit GPS
 * Adafruit ILI9441
 * NeoGPS
-
-(SD library is already included in esp32 platform!)
 
 Note: To be able to flash the Leonardo from within Eclipse, one neeeds [avrdude_autoreset_wrapper](https://github.com/gotzl/avrdude_autoreset_wrapper).
 

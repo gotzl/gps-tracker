@@ -26,7 +26,7 @@
 #define PMTK_SET_NAVSPEED_THRESHOLD_06 "$PMTK386,0.6*3B"
 #define PMTK_SET_BAUD_115200 "$PMTK251,115200*1F"
 
-//#define DEBUG
+#define DEBUG
 #define EEPROM_SIZE 8
 
 #define GPS_PORT_NAME "Serial"
@@ -60,7 +60,11 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 //------------------------------------------------------------
 
 // stuff needed for keeping track of past locations
+#ifdef DEBUG
+const uint16_t MAX_TRACK_POINTS = 100;
+#else
 const uint16_t MAX_TRACK_POINTS = 5000;
+#endif
 const char* tmp_lap = "/tmp/lap.bin";
 _track track_ref;
 _point* track;
@@ -96,9 +100,10 @@ int32_t nextIdx(NeoGPS::Location_t pnt, int32_t current, uint32_t limit) {
 	int32_t idx;
 
 	for (uint32_t i = current; i < min(limit, track_ref.meta.points); i++) {
+		// check if we have to fetch new points of the reference lap
 		if (i>track_ref.points_loaded) {
 			track_ref.points_offset = track_ref.points_loaded;
-			track_ref.points_loaded = loadPoints(SD, track_ref, MAX_TRACK_POINTS);
+			track_ref.points_loaded = loadLapPoints(SD, track_ref, MAX_TRACK_POINTS);
 		}
 		distance = pnt.DistanceKm(track_ref.track[i-track_ref.points_offset].location);
 		if (i == 0 || distance < closest) {
@@ -165,17 +170,21 @@ bool startFinishCrossing() {
 	return false;
 }
 
-void setAsReference(_track_meta &meta) {
+bool setAsReference(_track_meta &meta) {
 	DEBUG_PORT.println(F("!! Setting new ref !!"));
 
 	if (tmp_cnt>0) {
-		DEBUG_PORT.print(F("Reading ref from file"));
 		snprintf(track_ref.path, sizeof track_ref.path,
 				"/session%03hu/lap%03hu.bin",
 				meta.session,
 				meta.lap);
 
-		track_ref.points_loaded = loadLap(SD, track_ref, MAX_TRACK_POINTS);
+		if (!loadLapMeta(SD, track_ref))
+			return false;
+
+		track_ref.points_loaded = 0;
+		track_ref.points_offset = 0;
+		track_ref.points_loaded = loadLapPoints(SD, track_ref, MAX_TRACK_POINTS);
 
 	} else {
 		track_ref.meta = meta;
@@ -184,6 +193,8 @@ void setAsReference(_track_meta &meta) {
 		memcpy(track_ref.track, track,
 			sizeof(_point) * MAX_TRACK_POINTS);
 	}
+
+	return true;
 }
 
 int32_t offsetCorrection(NeoGPS::Location_t ref_loc) {
@@ -202,7 +213,7 @@ void handleFixInfo() {
 	fix_time_millis = ((uint32_t) fix.dateTime) * 1000 + (fix.dateTime_ms() % 1000);
 	lframe.time = fix_time_millis;
 
-	if (lframe.start_time>0)
+	if (lframe.start_time==0)
 		lframe.start_time = fix_time_millis;
 
 	lframe.time -= lframe.start_time;
@@ -226,7 +237,7 @@ _track_meta createMeta() {
 	return meta;
 }
 
-void createFile(_track_meta &meta) {
+void writeLap(_track_meta &meta) {
 	char name[23];
 	DEBUG_PORT.print(F("Creating file for lap: "));
 
@@ -241,11 +252,15 @@ void createFile(_track_meta &meta) {
 			sizeof(_track_meta));
 
 	DEBUG_PORT.println(F(" ... writing points"));
+	// write points stored on SD to the lap file
 	if (tmp_cnt>0)
 		appendFile(SD, name, tmp_lap);
+
+	// write points from RAM to the lap files
 	appendFile(SD, name,
 			(uint8_t*) track,
-			sizeof(_point) * (meta.points));
+			sizeof(_point) * (lframe.pts));
+
 	DEBUG_PORT.println(F(" ... Done."));
 }
 
@@ -288,7 +303,7 @@ void doSomeWork() {
 //		} else
 //			moving = true;
 
-		if (start_finish_crossing && lframe.pts > 50) {
+		if (start_finish_crossing && lframe.pts > 10) {
 			DEBUG_PORT.println(F("!! Start/Finish crossing !!"));
 
 			offset = offsetCorrection(start_finish);
@@ -298,12 +313,11 @@ void doSomeWork() {
 				lframe.finish_time = fix_time_millis + offset;
 
 				_track_meta meta = createMeta();
-				createFile(meta);
+				writeLap(meta);
 
-				if (!has_ref/*or faster*/) {
-					setAsReference(meta);
-					has_ref = true;
-				}
+				if (!has_ref/*or faster*/)
+					has_ref = setAsReference(meta);
+
 			}
 
 			valid_lap = true;
@@ -408,8 +422,6 @@ void setup_tracker() {
 	lframe.time = 0;
 	lframe.delta = 0;
 	lframe.start_time = 0;
-
-	createDir(SD, "/tmp");
 }
 
 bool check_WiFi(uint16_t thresh) {
@@ -482,6 +494,8 @@ void setup() {
 	has_sd = setup_sd();
 	if (!has_sd)
 		return;
+	createDir(SD, "/tmp");
+
 
 	timer = timerBegin(1, 80, true); // count in microseconds
 	timerAttachInterrupt(timer, &onTimer, true);
@@ -526,23 +540,36 @@ void loop() {
 		incomingByte = displayPort.read();
 
 	if (incomingByte > 0) {
-		if (incomingByte == 1) {
-			lframe.pts = 0;
-			tmp_cnt = 0;
-
-			valid_lap = false;
-			has_ref = false;
-			lframe.time = 0;
-
+		if (incomingByte == 1 && fix.valid.location) {
 			start_finish = fix.location;
 
 			DEBUG_PORT.print( F("Writing start/finish: ") );
-			EEPROM.writeUInt(0, start_finish.lon());
-			EEPROM.writeUInt(4, start_finish.lat());
+			EEPROM.writeInt(0, start_finish.lat());
+			EEPROM.writeInt(4, start_finish.lon());
 			EEPROM.commit();
 			DEBUG_PORT.print(start_finish.lat());
 			DEBUG_PORT.print(',');
 			DEBUG_PORT.println(start_finish.lon());
+
+			// start a new, valid lap
+			// set last point of previous track as first point of this track
+			ori[0] = ori[lframe.pts % 32];
+			dist[0] = dist[lframe.pts % 32];
+			speed[0] = speed[lframe.pts % 32];
+			track[0] = track[lframe.pts];
+
+
+			if (tframe.session == 0)
+				tframe.session = createSessionDir(SD);
+			tframe.lap++;
+
+			lframe.pts = 0;
+			lframe.time = 0;
+			lframe.start_time = fix_time_millis;
+			ref_idx = -1;
+
+			tmp_cnt = 0;
+			valid_lap = true;
 		}
 		DEBUG_PORT.print("Received command ");
 		DEBUG_PORT.println(incomingByte);
@@ -596,6 +623,10 @@ void IRAM_ATTR onTimer() {
 			displayPort.write(BEGIN_GFRAME);
 			displayPort.write((uint8_t*) &gframe, sizeof gframe);
 		}
+
+		has_wifi = WiFi.status() == WL_CONNECTED;
+		digitalWrite(LED_BUILTIN, (valid_lap && lframe.pts<25)?HIGH:LOW);
+
 //	}
 //
 //	cnt++;
@@ -603,8 +634,7 @@ void IRAM_ATTR onTimer() {
 //		cnt = 0;
 //
 //	if (cnt == 1) {
-		has_wifi = WiFi.status() == WL_CONNECTED;
-		digitalWrite(LED_BUILTIN, has_wifi?HIGH:LOW);
+
 
 	if (false) {
 

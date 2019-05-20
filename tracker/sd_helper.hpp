@@ -82,49 +82,49 @@ uint16_t createSessionDir(fs::FS &fs) {
 }
 
 
-uint32_t loadLap(fs::FS &fs, _track &track_ref, uint32_t limit){
-    Serial.printf("Reading file: %s\n", track_ref.path);
+bool loadLapMeta(fs::FS &fs, _track &track_ref){
+    Serial.print( F("Reading meta from file: ") );
+    Serial.print(  track_ref.path );
     int ret = -1;
 
     File file = fs.open(track_ref.path);
     if(!file){
-        Serial.println("Failed to open file for reading");
-        return ret;
+        Serial.println( F("Failed to open file for reading") );
+        return false;
     }
 
-    Serial.print("Read from file: ");
-    while(file.available()){
+    if (file.available())
         file.read((uint8_t*) &(track_ref.meta),
     			sizeof(_track_meta));
-        ret = min(track_ref.meta.points, limit);
-        file.read((uint8_t*) &(track_ref.track),
-        		sizeof(_point) * ret);
-    }
+
+    Serial.println( F(" ... Success!") );
     file.close();
-    return ret;
+    return true;
 }
 
 
-uint32_t loadPoints(fs::FS &fs, _track &track_ref, uint32_t limit){
-    Serial.printf("Reading file: %s\n", track_ref.path);
-    int ret = -1;
+int32_t loadLapPoints(fs::FS &fs, _track &track_ref, uint32_t limit){
+    Serial.print( F("Reading points from file: ") );
+    Serial.print(  track_ref.path );
+    int32_t ret = -1;
 
     File file = fs.open(track_ref.path);
     if(!file){
-        Serial.println("Failed to open file for reading");
+        Serial.println( F("Failed to open file for reading") );
         return ret;
     }
 
-    Serial.print("Read from file: ");
-    while(file.available()){
+    if (file.available()) {
         uint32_t pos = sizeof(_track_meta) + track_ref.points_loaded * sizeof(_point);
 
         ret = min(track_ref.meta.points, pos + limit);
 
         file.seek(pos);
-        file.read((uint8_t*) &(track_ref.track),
+        file.read((uint8_t*) track_ref.track,
         		sizeof(_point) * (ret-pos));
     }
+
+    Serial.println( F(" ... Success!") );
     file.close();
     return ret;
 }
@@ -170,30 +170,6 @@ void createDir(fs::FS &fs, const char * path){
     }
 }
 
-void removeDir(fs::FS &fs, const char * path){
-    Serial.printf("Removing Dir: %s\n", path);
-    if(fs.rmdir(path)){
-        Serial.println("Dir removed");
-    } else {
-        Serial.println("rmdir failed");
-    }
-}
-
-void readFile(fs::FS &fs, const char * path){
-    Serial.printf("Reading file: %s\n", path);
-
-    File file = fs.open(path);
-    if(!file){
-        Serial.println("Failed to open file for reading");
-        return;
-    }
-
-    Serial.print("Read from file: ");
-    while(file.available()){
-        Serial.write(file.read());
-    }
-    file.close();
-}
 
 void writeFile(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
     Serial.printf("Writing file: %s\n", path);
@@ -211,6 +187,7 @@ void writeFile(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
     file.close();
 }
 
+
 void appendFile(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
     Serial.printf("Appending to file: %s\n", path);
 
@@ -227,47 +204,33 @@ void appendFile(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
     file.close();
 }
 
+
 void appendFile(fs::FS &fs, const char * path, const char * source){
+    uint8_t buf[128];
+    int bytes;
+
     Serial.printf("Appending content of %s to file: %s\n", source, path);
 
     File file = fs.open(path, FILE_APPEND);
-    if(!file){
-        Serial.println( F("Failed to open file for appending") );
-        return;
-    }
     File sfile = fs.open(source, FILE_READ);
-    if(!sfile){
+    if(!file || !sfile){
         Serial.println( F("Failed to open file for appending") );
         return;
     }
-    if(file.write(sfile.read())){
-        Serial.println( F("Message appended") );
-    } else {
-        Serial.println( F("Append failed") );
+
+
+    bytes = sfile.read((uint8_t*)&buf, sizeof buf);
+    while(bytes>0) {
+        if (file.write((uint8_t*)&buf, bytes)<=0) {
+        	Serial.println( F("Append failed") );
+        	break;
+        }
+        bytes = sfile.read((uint8_t*)&buf, sizeof buf);
     }
+
     sfile.close();
     file.close();
 }
-
-
-void renameFile(fs::FS &fs, const char * path1, const char * path2){
-    Serial.printf("Renaming file %s to %s\n", path1, path2);
-    if (fs.rename(path1, path2)) {
-        Serial.println("File renamed");
-    } else {
-        Serial.println("Rename failed");
-    }
-}
-
-void deleteFile(fs::FS &fs, const char * path){
-    Serial.printf("Deleting file: %s\n", path);
-    if(fs.remove(path)){
-        Serial.println("File deleted");
-    } else {
-        Serial.println("Delete failed");
-    }
-}
-
 
 
 bool setup_sd() {

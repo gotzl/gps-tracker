@@ -114,7 +114,7 @@ vector<_point> readTrack(string name, const _track_meta *meta) {
 		file.read ((char *) meta, sizeof(_track_meta));
 
 		_point  track_buff[sizeof(_point)*meta->points];
-		file.read ((char *) &track_buff, sizeof(_point)*meta->points);
+		file.read ((char *) &track_buff, sizeof track_buff);
 		file.close();
 
 		track = vector<_point>(track_buff, track_buff + meta->points);
