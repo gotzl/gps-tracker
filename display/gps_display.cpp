@@ -48,26 +48,29 @@ static TS_Point p;
 #define FIX_X_OFFSET 50
 #define SPD_X 100
 #define SPD_Y 220
-#define SPD_X_OFFSET 80
+#define SPD_X_OFFSET 85
 #define BEAR_X 180
 #define BEAR_Y 0
 #define BEAR_X_OFFSET 80
 
 #define LAP_X 0
-#define LAP_Y 20
-#define LAP_X_OFFSET 50
+#define LAP_Y 40
+#define LAP_X_OFFSET 55
+#define SESS_X 0
+#define SESS_Y 20
+#define SESS_X_OFFSET 55
 #define TIME_X 120
 #define TIME_Y 20
 #define TIME_X_OFFSET 60
 #define DELTA_X 100
 #define DELTA_Y 100
 #define DELTA_X_OFFSET 100
-#define PNTS_X 00
+#define PNTS_X 120
 #define PNTS_Y 40
 #define PNTS_X_OFFSET 80
 #define STAT_X 0
 #define STAT_Y 180
-#define STAT_X_OFFSET 260
+#define STAT_X_OFFSET 240
 #define DIST_X 0
 #define DIST_Y 200
 #define DIST_X_OFFSET 140
@@ -178,7 +181,6 @@ void updateLapData() {
 	lvalid = false;
 }
 
-
 void updateGpsData() {
 	tft.setRotation(1);
 
@@ -190,9 +192,9 @@ void updateGpsData() {
 	tft.print(gframe.fix);
 
 	tft.setCursor(SPD_X+SPD_X_OFFSET, SPD_Y);
-	sprintf(value, "%03i.%03ikm/h",
+	sprintf(value, "%03i.%02ikm/h",
 			gframe.speed/1000,
-			gframe.speed%1000);
+			(gframe.speed/10)%100);
 	tft.print(value);
 
 	tft.setCursor(BEAR_X+BEAR_X_OFFSET, BEAR_Y);
@@ -211,13 +213,18 @@ void updateTimeData() {
 			tframe.hours,tframe.minutes,tframe.seconds);
 	tft.print(value);
 
+	tft.setCursor(SESS_X+SESS_X_OFFSET, SESS_Y);
+	sprintf(value, "%03u", tframe.session);
+	tft.print(value);
 
 	tft.setCursor(LAP_X+LAP_X_OFFSET, LAP_Y);
-	sprintf(value, "%02i/%02i", tframe.session, tframe.lap);
+	sprintf(value, "%03u", tframe.lap);
 	tft.print(value);
 
 
-	tft.setCursor(STAT_X+STAT_X_OFFSET, STAT_Y+20);
+	tft.setCursor(STAT_X+STAT_X_OFFSET, STAT_Y);
+	tft.print(tframe.stat>>5&0x1);
+	tft.print(tframe.stat>>4&0x1);
 	tft.print(tframe.stat>>3&0x1);
 	tft.print(tframe.stat>>2&0x1);
 	tft.print(tframe.stat>>1&0x1);
@@ -228,6 +235,11 @@ void updateTimeData() {
 
 
 void handleTouch() {
+	// 'debounce' ....
+	static long last_touch = millis();
+	if (millis()-last_touch < 200)
+		return
+
 	// erase previous point
 	tft.setRotation(0);
 	tft.fillCircle(p.x, p.y, PENRADIUS, ILI9341_BLACK);
@@ -261,6 +273,8 @@ void handleTouch() {
 			Serial.println("right top");
 		}
 	}
+
+	last_touch = millis();
 }
 
 
@@ -304,6 +318,8 @@ void setup() {
 	tft.setTextSize(2);
 	tft.setRotation(1);
 
+	tft.setCursor(SESS_X, SESS_Y);
+	tft.print(F("Sess: "));
 	tft.setCursor(LAP_X, LAP_Y);
 	tft.print(F("Lap: "));
 	tft.setCursor(TIME_X, TIME_Y);
@@ -315,8 +331,9 @@ void setup() {
 	tft.setCursor(DIST_X, DIST_Y);
 	tft.print(F("Dist start: "));
 	tft.setCursor(STAT_X, STAT_Y);
-	tft.print( F("stat(mvng,vld,ref,appr): "));
-
+	tft.setTextSize(1.5);
+	tft.print( F("stat(tmp,vld,ref,sd,wifi,ws): "));
+	tft.setTextSize(2);
 
 	tft.setCursor(SATS_X, SATS_Y);
 	tft.print(F("Sats: "));

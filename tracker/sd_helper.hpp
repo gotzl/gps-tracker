@@ -10,8 +10,8 @@
 #include "SD.h"
 
 
-int16_t createSessionDir(fs::FS &fs) {
-	int16_t session = -1;
+uint16_t createSessionDir(fs::FS &fs) {
+	uint16_t session = 1;
     uint16_t n_files = 0;
     char session_dir[12];
 
@@ -69,7 +69,7 @@ int16_t createSessionDir(fs::FS &fs) {
     // create new session folder
     session += 1;
 
-    snprintf(session_dir, sizeof session_dir, "/session%03i", session);
+    snprintf(session_dir, sizeof session_dir, "/session%03hu", session);
     Serial.print( F("Creating session dir: ") );
     Serial.print( session_dir );
     if(fs.mkdir(session_dir)){

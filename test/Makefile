@@ -8,5 +8,5 @@ lib: gps_tracker.o
 	g++ -shared -Wl,-soname,libTest.so -o libTest.so gps_tracker.o
 
 pybinding: gps_tracker.o
-	g++ -DPYTHON -O3 -Wall -shared -std=c++11 -fPIC `python3 -m pybind11 --includes` pybinding.cpp -o example`python3-config --extension-suffix`
+	g++ -DPYTHON -O3 -Wall -shared -std=c++11 -fPIC `python3 -m pybind11 --includes` pybinding.cpp -o gpstracker`python3-config --extension-suffix`
 

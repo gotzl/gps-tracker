@@ -6,23 +6,28 @@
 #include "gps_tracker.hpp"
 #include "protocol.hpp"
 
-//#define DEBUG
+#include <WiFi.h>
+#include <Update.h>
+#include <EEPROM.h>
 
+#include "sd_helper.hpp"
+#include "webserver_helper.hpp"
 
 //#define NMEAGPS_PARSE_SATELLITES
 #include <NMEAGPS.h>
 
 #include <Adafruit_GPS.h>
+
+//------------------------------------------------------------
+//------------------------------------------------------------
+
+
 #define PMTK_SET_NAVSPEED_THRESHOLD_04 "$PMTK386,0.4*39"
 #define PMTK_SET_NAVSPEED_THRESHOLD_06 "$PMTK386,0.6*3B"
 #define PMTK_SET_BAUD_115200 "$PMTK251,115200*1F"
-//Adafruit_GPS GPS(&Serial1);
 
-#include <WiFi.h>
-#include <Update.h>
-
-#include "sd_helper.hpp"
-#include "webserver_helper.hpp"
+//#define DEBUG
+#define EEPROM_SIZE 8
 
 #define GPS_PORT_NAME "Serial"
 
@@ -36,6 +41,7 @@
 #define gpsPort DEBUG_PORT
 #endif
 
+//------------------------------------------------------------
 //------------------------------------------------------------
 
 NMEAGPS gps;  // This parses the GPS characters
@@ -165,7 +171,7 @@ void setAsReference(_track_meta &meta) {
 	if (tmp_cnt>0) {
 		DEBUG_PORT.print(F("Reading ref from file"));
 		snprintf(track_ref.path, sizeof track_ref.path,
-				"/session%03hi/lap%03hi.bin",
+				"/session%03hu/lap%03hu.bin",
 				meta.session,
 				meta.lap);
 
@@ -194,11 +200,15 @@ void handleFixInfo() {
 	speed[lframe.pts % 32] = fix.speed_kph() * 1000;
 
 	fix_time_millis = ((uint32_t) fix.dateTime) * 1000 + (fix.dateTime_ms() % 1000);
+	lframe.time = fix_time_millis;
 
-	if (valid_lap)
-		lframe.time = fix_time_millis - lframe.start_time;
+	if (lframe.start_time>0)
+		lframe.start_time = fix_time_millis;
+
+	lframe.time -= lframe.start_time;
 
 	track[lframe.pts].time = lframe.time;
+	track[lframe.pts].speed = speed[lframe.pts % 32];
 	track[lframe.pts].location = fix.location;
 };
 
@@ -221,7 +231,7 @@ void createFile(_track_meta &meta) {
 	DEBUG_PORT.print(F("Creating file for lap: "));
 
 	snprintf(name, sizeof name,
-			"/session%03hi/lap%03hi.bin",
+			"/session%03hu/lap%03hu.bin",
 			meta.session,
 			meta.lap);
 
@@ -248,7 +258,7 @@ void doSomeWork() {
 
 	// exceeded the max storage, reset counter and invalidate lap
 	if (lframe.pts >= MAX_TRACK_POINTS) {
-		if (tframe.lap>=0) {
+		if (tframe.lap>0) {
 			if (tmp_cnt == 0)
 				writeFile(SD, tmp_lap,
 						(uint8_t*) track,
@@ -305,7 +315,7 @@ void doSomeWork() {
 			track[0] = track[lframe.pts];
 
 
-			if (tframe.session < 0)
+			if (tframe.session == 0)
 				tframe.session = createSessionDir(SD);
 			tframe.lap++;
 
@@ -369,6 +379,20 @@ void setup_gps() {
 }
 
 void setup_tracker() {
+
+	// load previous start/finish from eeprom
+	EEPROM.begin(EEPROM_SIZE);
+	int32_t lat = EEPROM.readInt(0);
+	int32_t lon = EEPROM.readInt(4);
+	if (lat>0 && lon>0) {
+		DEBUG_PORT.print( F("Loaded start/finish: ") );
+		start_finish = NeoGPS::Location_t(lat, lon);
+		DEBUG_PORT.print(start_finish.lat());
+		DEBUG_PORT.print(',');
+		DEBUG_PORT.println(start_finish.lon());
+	}
+
+
 	// allocate memory for the track recording and reference
 	track = new _point[MAX_TRACK_POINTS];
 	track_ref.track = new _point[MAX_TRACK_POINTS];
@@ -377,14 +401,15 @@ void setup_tracker() {
 	DEBUG_PORT.printf("biggest free block: %i\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
 	// set some defaults
-	tframe.lap = -1;
-	tframe.session = -1;
+	tframe.lap = 0;
+	tframe.session = 0;
 
 	lframe.pts = 0;
 	lframe.time = 0;
 	lframe.delta = 0;
+	lframe.start_time = 0;
 
-	createDir(SD, "/tmp/");
+	createDir(SD, "/tmp");
 }
 
 bool check_WiFi(uint16_t thresh) {
@@ -510,6 +535,14 @@ void loop() {
 			lframe.time = 0;
 
 			start_finish = fix.location;
+
+			DEBUG_PORT.print( F("Writing start/finish: ") );
+			EEPROM.writeUInt(0, start_finish.lon());
+			EEPROM.writeUInt(4, start_finish.lat());
+			EEPROM.commit();
+			DEBUG_PORT.print(start_finish.lat());
+			DEBUG_PORT.print(',');
+			DEBUG_PORT.println(start_finish.lon());
 		}
 		DEBUG_PORT.print("Received command ");
 		DEBUG_PORT.println(incomingByte);
@@ -539,7 +572,7 @@ void IRAM_ATTR onTimer() {
 			tframe.month = fix.dateTime.month;
 			tframe.year = fix.dateTime.year;
 
-			tframe.stat = moving << 3 | valid_lap << 2 | has_ref << 1 | has_sd;
+			tframe.stat = (tmp_cnt>0) << 5| valid_lap << 4| has_ref << 3| has_sd << 2| has_wifi << 1| ws_running;
 
 			displayPort.write(BEGIN_TFRAME);
 			displayPort.write((uint8_t*) &tframe, sizeof tframe);

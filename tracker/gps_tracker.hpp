@@ -37,20 +37,20 @@ struct _location {
 
 struct _point
 {
-	uint32_t        time;
-	uint32_t        speed;
+	uint32_t        time;	// in ms
+	uint32_t        speed;	// in m/h
 	_location		location;
 };
 
 struct _track_meta
 {
 	uint32_t points;
-	uint32_t start_time;
-	uint32_t finish_time;
-	uint32_t time;
+	uint32_t start_time;	// in ms utc
+	uint32_t finish_time;	// in ms utc
+	uint32_t time;			// in ms
 	_location start_finish;
-	int16_t lap;
-	int16_t session;
+	uint16_t lap;
+	uint16_t session;
 };
 
 struct _track
@@ -128,7 +128,7 @@ vector<_point> readTrack(string name, const _track_meta *meta) {
 #ifdef PYTHON
 namespace py = pybind11;
 
-PYBIND11_MODULE(example, m) {
+PYBIND11_MODULE(gpstracker, m) {
     m.doc() = "pybind11 test";
     m.def("offsetCorrection",&offsetCorrection,"blablup");
     m.def("orientation",&orientation,"blablup");
@@ -141,6 +141,7 @@ PYBIND11_MODULE(example, m) {
     py::class_<_point>(m, "_point")
         .def(py::init<>())
 		.def_readwrite("time", &_point::time)
+		.def_readwrite("speed", &_point::speed)
 		.def_readwrite("location", &_point::location);
     py::class_<_track_meta>(m, "_track_meta")
         .def(py::init<>())

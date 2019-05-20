@@ -5,7 +5,7 @@ The goal is to create a GPS tracker and LapTimer that records laps performed at 
 The code is currently very messy and might get some cleanup at a later point.
 
 ## Features:
-### Implemented
+### (Somewhat) Implemented
 * define start/finish line
 * detect start/finish crossing to start/end a lap
 * show laptime, lap number and various other information
@@ -18,7 +18,7 @@ The code is currently very messy and might get some cleanup at a later point.
 ### Planned
 * navigation via touchscreen through a menu to allow 
 	* loading a specific reference from SD
-	* loading a predifine start/finish line location
+	* loading a predefined start/finish line location (associated to a certain track 'track')
 	* setting up the WiFi connection
 * record analog inputs (ie for break/gas pedal)
 * get a proper GPS antenna
@@ -61,8 +61,7 @@ Eclipse IDE with the following platforms/libraries
 ### Platforms:
 * arduino
 * esp32
-	* FFat, FS, SD, SPI
-	* Update, WebServer, WiFi (needs [this fix](https://github.com/espressif/arduino-esp32/issues/1327#issuecomment-435839829))
+	* FFat, FS, SD, SPI, EEPROM	* Update, WebServer, WiFi (needs [this fix](https://github.com/espressif/arduino-esp32/issues/1327#issuecomment-435839829))
 
 ### Libraries:
 * Adafruit FT6206

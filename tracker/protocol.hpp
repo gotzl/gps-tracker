@@ -8,8 +8,8 @@
 #define BEGIN_GFRAME 	0xE0
 
 struct tFrame {
-	int16_t session;
-	int16_t lap;
+	uint16_t session;
+	uint16_t lap;
 	uint8_t stat;
 	uint8_t seconds;    //!< 00-59
 	uint8_t minutes;    //!< 00-59
